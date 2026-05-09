@@ -11,8 +11,14 @@ export function resolvePiPackageRoot(): string | undefined {
 		let dir = path.dirname(fs.realpathSync(entry));
 		while (dir !== path.dirname(dir)) {
 			try {
-				const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8"));
-				if (pkg.name === "@mariozechner/pi-coding-agent") return dir;
+				const pkg = JSON.parse(
+					fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
+				);
+				const KNOWN_PI_PACKAGE_NAMES = [
+					"@mariozechner/pi-coding-agent",
+					"@earendil-works/pi-coding-agent",
+				];
+				if (KNOWN_PI_PACKAGE_NAMES.includes(pkg.name)) return dir;
 			} catch {}
 			dir = path.dirname(dir);
 		}
@@ -35,7 +41,10 @@ interface PiSpawnCommand {
 	args: string[];
 }
 
-function isRunnableNodeScript(filePath: string, existsSync: (filePath: string) => boolean): boolean {
+function isRunnableNodeScript(
+	filePath: string,
+	existsSync: (filePath: string) => boolean,
+): boolean {
 	if (!existsSync(filePath)) return false;
 	return /\.(?:mjs|cjs|js)$/i.test(filePath);
 }
@@ -44,9 +53,13 @@ function normalizePath(filePath: string): string {
 	return path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
 }
 
-export function resolveWindowsPiCliScript(deps: PiSpawnDeps = {}): string | undefined {
+export function resolveWindowsPiCliScript(
+	deps: PiSpawnDeps = {},
+): string | undefined {
 	const existsSync = deps.existsSync ?? fs.existsSync;
-	const readFileSync = deps.readFileSync ?? ((filePath, encoding) => fs.readFileSync(filePath, encoding));
+	const readFileSync =
+		deps.readFileSync ??
+		((filePath, encoding) => fs.readFileSync(filePath, encoding));
 	const argv1 = deps.argv1 ?? process.argv[1];
 
 	if (argv1) {
@@ -57,21 +70,35 @@ export function resolveWindowsPiCliScript(deps: PiSpawnDeps = {}): string | unde
 	}
 
 	try {
-		const resolvePackageJson = deps.resolvePackageJson ?? (() => {
-			const root = deps.piPackageRoot ?? resolvePiPackageRoot();
-			if (root) return path.join(root, "package.json");
-			return require.resolve("@mariozechner/pi-coding-agent/package.json");
-		});
+		const resolvePackageJson =
+			deps.resolvePackageJson ??
+			(() => {
+				const root = deps.piPackageRoot ?? resolvePiPackageRoot();
+				if (root) return path.join(root, "package.json");
+				const piPackageNames = [
+					"@earendil-works/pi-coding-agent",
+					"@mariozechner/pi-coding-agent",
+				];
+				for (const pkgName of piPackageNames) {
+					try {
+						return require.resolve(`${pkgName}/package.json`);
+					} catch {}
+				}
+				throw new Error("Could not resolve pi-coding-agent package");
+			});
 		const packageJsonPath = resolvePackageJson();
 		const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
 			bin?: string | Record<string, string>;
 		};
 		const binField = packageJson.bin;
-		const binPath = typeof binField === "string"
-			? binField
-			: binField?.pi ?? Object.values(binField ?? {})[0];
+		const binPath =
+			typeof binField === "string"
+				? binField
+				: (binField?.pi ?? Object.values(binField ?? {})[0]);
 		if (!binPath) return undefined;
-		const candidate = normalizePath(path.resolve(path.dirname(packageJsonPath), binPath));
+		const candidate = normalizePath(
+			path.resolve(path.dirname(packageJsonPath), binPath),
+		);
 		if (isRunnableNodeScript(candidate, existsSync)) {
 			return candidate;
 		}
@@ -82,7 +109,10 @@ export function resolveWindowsPiCliScript(deps: PiSpawnDeps = {}): string | unde
 	return undefined;
 }
 
-export function getPiSpawnCommand(args: string[], deps: PiSpawnDeps = {}): PiSpawnCommand {
+export function getPiSpawnCommand(
+	args: string[],
+	deps: PiSpawnDeps = {},
+): PiSpawnCommand {
 	const platform = deps.platform ?? process.platform;
 	if (platform === "win32") {
 		const piCliPath = resolveWindowsPiCliScript(deps);
